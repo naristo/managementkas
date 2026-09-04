@@ -10,27 +10,28 @@ import {
   CheckCircle, Clock, XCircle, FileText, 
   Upload, Copy, Download, UserPlus, Trash2, 
   History, Calendar, CreditCard, Lock, LogOut, 
-  Key, AlertTriangle, ShieldPlus, PlusCircle, Building, ShieldCheck
+  Key, AlertTriangle, ShieldPlus, PlusCircle, Building, ShieldCheck, Search
 } from 'lucide-react';
 
-// --- SETUP FIREBASE ---
 // --- 1. SETUP FIREBASE ---
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : ''),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).authDomain : ''),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).projectId : ''),
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).storageBucket : ''),
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).messagingSenderId : ''),
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).appId : '')
 };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'kas-kelas-app';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'demo-uang-kas-multikelas';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
 const CURRENT_YEAR = new Date().getFullYear();
+// Generate pilihan tahun dari tahun ini hingga 5 tahun ke depan
+const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR + i);
 const DEFAULT_SETTINGS = { iuranBulanan: 20000, bankName: 'BCA', bankAccount: '1234567890', bankOwner: 'Bendahara Kelas' };
 const SUPER_ADMIN_PIN = "admin123";
 
@@ -49,6 +50,10 @@ export default function App() {
   });
   const [loginTab, setLoginTab] = useState('siswa');
   const [loginClassId, setLoginClassId] = useState('');
+  
+  // State Autocomplete / Search Nama Siswa saat Login
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
+  const [isStudentDropdownOpen, setIsStudentDropdownOpen] = useState(false);
 
   const [allClasses, setAllClasses] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
@@ -57,6 +62,7 @@ export default function App() {
   const [allSettings, setAllSettings] = useState([]);
 
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedReportYear, setSelectedReportYear] = useState(CURRENT_YEAR);
   
   useEffect(() => {
     let isMounted = true;
@@ -122,6 +128,13 @@ export default function App() {
   const expenses = useMemo(() => allExpenses.filter(e => e.classId === currentAuth.classId), [allExpenses, currentAuth.classId]);
   const settings = useMemo(() => allSettings.find(s => s.id === currentAuth.classId) || DEFAULT_SETTINGS, [allSettings, currentAuth.classId]);
   const currentStudent = useMemo(() => students.find(s => s.id === currentAuth.studentId) || null, [students, currentAuth.studentId]);
+
+  // Filter siswa untuk autocomplete login berdasarkan input
+  const filteredLoginStudents = useMemo(() => {
+    const list = allStudents.filter(s => s.classId === loginClassId);
+    if (!studentSearchQuery.trim()) return list;
+    return list.filter(s => s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()));
+  }, [allStudents, loginClassId, studentSearchQuery]);
 
   const stats = useMemo(() => {
     if (currentAuth.role === 'superadmin') {
@@ -205,13 +218,9 @@ export default function App() {
     }
   };
 
-  const handleLoginSiswa = (e) => {
-    e.preventDefault();
-    const classId = e.target.classId.value;
-    const studentId = e.target.studentId.value;
-    if (!classId || !studentId) return showToast('Pilih kelas dan nama Anda', 'error');
-    
-    setCurrentAuth({ isLoggedIn: true, role: 'siswa', classId, studentId });
+  const handleLoginSiswaSubmit = (studentId) => {
+    if (!loginClassId || !studentId) return showToast('Pilih kelas dan nama Anda dengan benar', 'error');
+    setCurrentAuth({ isLoggedIn: true, role: 'siswa', classId: loginClassId, studentId });
     setActiveTab('dashboard');
     showToast(`Berhasil masuk!`);
   };
@@ -219,6 +228,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentAuth({ isLoggedIn: false, role: null, classId: null, studentId: null });
     setLoginClassId('');
+    setStudentSearchQuery('');
     setLoginTab('siswa');
     setActiveTab('dashboard');
   };
@@ -265,18 +275,18 @@ export default function App() {
     });
   };
 
-  const handleSubmitPayment = async (month, amount, method) => {
+  const handleSubmitPayment = async (month, year, amount, method) => {
     if (!currentAuth.studentId) return;
-    const existing = payments.find(p => p.studentId === currentAuth.studentId && p.month === month && p.year === CURRENT_YEAR);
+    const existing = payments.find(p => p.studentId === currentAuth.studentId && p.month === month && p.year === year);
     if (existing) {
-      if (existing.status === 'lunas') return showToast('Bulan ini sudah lunas!', 'error');
-      if (existing.status === 'menunggu') return showToast('Pembayaran bulan ini sedang menunggu verifikasi.', 'error');
+      if (existing.status === 'lunas') return showToast(`Bulan ${MONTHS[month]} ${year} sudah lunas!`, 'error');
+      if (existing.status === 'menunggu') return showToast(`Pembayaran bulan ${MONTHS[month]} ${year} sedang menunggu verifikasi.`, 'error');
     }
 
     try {
       const basePath = ['artifacts', appId, 'public', 'data'];
       await addDoc(collection(db, ...basePath, 'payments'), {
-        classId: currentAuth.classId, studentId: currentAuth.studentId, month, year: CURRENT_YEAR, 
+        classId: currentAuth.classId, studentId: currentAuth.studentId, month, year, 
         amount, method, status: 'menunggu', timestamp: new Date().toISOString()
       });
       showToast('Pembayaran dikirim. Menunggu verifikasi.');
@@ -364,11 +374,11 @@ export default function App() {
   };
 
   const handleExportCSV = () => {
-    let csvContent = "data:text/csv;charset=utf-8,Nama Siswa," + MONTHS.join(",") + "\n";
+    let csvContent = `data:text/csv;charset=utf-8,Nama Siswa,` + MONTHS.join(",") + `\n`;
     [...students].sort((a,b) => a.name.localeCompare(b.name)).forEach(student => {
       let row = [student.name];
       for (let i = 0; i < 12; i++) {
-        const p = payments.find(p => p.studentId === student.id && p.month === i && p.year === CURRENT_YEAR);
+        const p = payments.find(p => p.studentId === student.id && p.month === i && p.year === selectedReportYear);
         row.push(p?.status === 'lunas' ? "Lunas" : p?.status === 'menunggu' ? "Menunggu" : "Belum");
       }
       csvContent += row.join(",") + "\n";
@@ -376,7 +386,7 @@ export default function App() {
     
     const link = document.createElement("a");
     link.setAttribute("href", encodeURI(csvContent));
-    link.setAttribute("download", `laporan_kas_${activeClass?.name || 'kelas'}_${CURRENT_YEAR}.csv`);
+    link.setAttribute("download", `laporan_kas_${activeClass?.name || 'kelas'}_${selectedReportYear}.csv`);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -400,6 +410,7 @@ export default function App() {
 
   if (isLoading) return <div className="flex items-center justify-center min-h-screen text-teal-600 bg-slate-50 font-medium">Memuat sistem...</div>;
 
+  // A. HALAMAN LOGIN
   if (!currentAuth.isLoggedIn) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -425,27 +436,65 @@ export default function App() {
             )}
 
             {loginTab === 'siswa' && (
-              <form onSubmit={handleLoginSiswa} className="space-y-4">
+              <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Pilih Kelas</label>
-                  <select name="classId" value={loginClassId} onChange={(e) => setLoginClassId(e.target.value)} required className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500">
-                    <option value="">-- Daftar Kelas --</option>
+                  <select 
+                    value={loginClassId} 
+                    onChange={(e) => { 
+                      setLoginClassId(e.target.value); 
+                      setStudentSearchQuery(''); 
+                    }} 
+                    className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500">
+                    <option value="">-- Pilih Kelas --</option>
                     {allClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Nama Siswa</label>
-                  <select name="studentId" required disabled={!loginClassId} className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 disabled:opacity-50">
-                    <option value="">{loginClassId ? "-- Pilih Nama Anda --" : "-- Pilih Kelas Dulu --"}</option>
-                    {allStudents.filter(s => s.classId === loginClassId).map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
+
+                {/* AUTOCOMPLETE / SEARCH NAMA SISWA */}
+                <div className="relative">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Cari / Pilih Nama Anda</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                      <Search className="w-4 h-4" />
+                    </span>
+                    <input 
+                      type="text" 
+                      disabled={!loginClassId}
+                      placeholder={loginClassId ? "Ketik nama Anda untuk mencari..." : "Pilih kelas terlebih dahulu..."}
+                      value={studentSearchQuery}
+                      onChange={(e) => {
+                        setStudentSearchQuery(e.target.value);
+                        setIsStudentDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsStudentDropdownOpen(true)}
+                      className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-xl bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 disabled:opacity-50 text-sm"
+                    />
+                  </div>
+
+                  {/* Dropdown Hasil Pencarian */}
+                  {isStudentDropdownOpen && loginClassId && (
+                    <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                      {filteredLoginStudents.length === 0 ? (
+                        <div className="p-3 text-sm text-slate-400 text-center">Nama tidak ditemukan</div>
+                      ) : (
+                        filteredLoginStudents.map(s => (
+                          <div 
+                            key={s.id} 
+                            onClick={() => {
+                              setStudentSearchQuery(s.name);
+                              setIsStudentDropdownOpen(false);
+                              handleLoginSiswaSubmit(s.id);
+                            }}
+                            className="p-3 hover:bg-teal-50 hover:text-teal-700 cursor-pointer text-sm font-medium border-b border-slate-50 last:border-0 transition-colors">
+                            {s.name}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button type="submit" className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 mt-4">
-                  <Users className="w-5 h-5"/> Masuk sebagai Siswa
-                </button>
-              </form>
+              </div>
             )}
 
             {loginTab === 'admin' && (
@@ -508,6 +557,7 @@ export default function App() {
     );
   }
 
+  // B. PANEL SUPER ADMIN
   if (currentAuth.role === 'superadmin') {
     return (
       <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-12">
@@ -716,7 +766,7 @@ export default function App() {
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-emerald-50 rounded-xl text-emerald-600"><TrendingUp className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan ({CURRENT_YEAR})</h3>
                 </div>
                 <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPemasukan)}</p>
               </div>
@@ -724,7 +774,7 @@ export default function App() {
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-rose-50 rounded-xl text-rose-600"><TrendingDown className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pengeluaran</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pengeluaran ({CURRENT_YEAR})</h3>
                 </div>
                 <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPengeluaran)}</p>
               </div>
@@ -792,29 +842,32 @@ export default function App() {
                       <CreditCard className="w-5 h-5" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-lg text-slate-800">Form Pembayaran</h3>
+                      <h3 className="font-bold text-lg text-slate-800">Form Pembayaran Multitahun</h3>
                       <p className="text-sm text-slate-500">Iuran bulanan: <strong className="text-slate-800">{formatRp(settings.iuranBulanan)}</strong>/bulan</p>
                     </div>
                   </div>
 
                   <form onSubmit={(e) => { 
                     e.preventDefault(); 
-                    handleSubmitPayment(Number(new FormData(e.target).get('month')), settings.iuranBulanan, 'transfer'); 
+                    const form = new FormData(e.target);
+                    handleSubmitPayment(Number(form.get('month')), Number(form.get('year')), settings.iuranBulanan, 'transfer'); 
                   }} className="space-y-5">
                     
-                    <div>
-                      <label className="block text-sm font-semibold mb-1.5 text-slate-700">Bayar Untuk Bulan</label>
-                      <select name="month" required className="w-full rounded-xl p-3.5 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none">
-                        {MONTHS.map((m, i) => {
-                          const p = payments.find(p => p.studentId === currentAuth.studentId && p.month === i && p.year === CURRENT_YEAR);
-                          let statusText = "", disabled = false;
-                          if (p) {
-                            if (p.status === 'lunas') { statusText = " (Sudah Lunas)"; disabled = true; }
-                            else if (p.status === 'menunggu') { statusText = " (Menunggu Verifikasi)"; disabled = true; }
-                          }
-                          return <option key={m} value={i} disabled={disabled}>{m} {CURRENT_YEAR} {statusText}</option>;
-                        })}
-                      </select>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold mb-1.5 text-slate-700">Pilih Tahun</label>
+                        <select name="year" defaultValue={CURRENT_YEAR} className="w-full rounded-xl p-3.5 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none">
+                          {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold mb-1.5 text-slate-700">Bayar Untuk Bulan</label>
+                        <select name="month" required className="w-full rounded-xl p-3.5 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none">
+                          {MONTHS.map((m, i) => (
+                            <option key={m} value={i}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
                     <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
@@ -842,7 +895,7 @@ export default function App() {
               <div className="lg:col-span-1">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-24">
                    <h3 className="font-bold text-lg text-slate-800 mb-4 border-b pb-2">Status Pembayaran {CURRENT_YEAR}</h3>
-                   <div className="space-y-3">
+                   <div className="space-y-3 max-h-[400px] overflow-y-auto">
                       {MONTHS.map((m, i) => {
                          const p = payments.find(pay => pay.studentId === currentAuth.studentId && pay.month === i && pay.year === CURRENT_YEAR);
                          let statusIcon, statusColor, statusText;
@@ -891,7 +944,7 @@ export default function App() {
                     <tr className="border-y border-slate-200 text-sm text-slate-500">
                       <th className="py-3 px-4 font-semibold">Tgl Pengajuan</th>
                       <th className="py-3 px-4 font-semibold">Nama Siswa</th>
-                      <th className="py-3 px-4 font-semibold">Bulan</th>
+                      <th className="py-3 px-4 font-semibold">Bulan / Tahun</th>
                       <th className="py-3 px-4 font-semibold">Nominal</th>
                       <th className="py-3 px-4 font-semibold text-center">Aksi</th>
                     </tr>
@@ -954,7 +1007,7 @@ export default function App() {
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="font-bold text-lg text-slate-800 mb-4 border-b border-slate-100 pb-3 flex items-center justify-between">
                   <span>Riwayat Pengeluaran</span>
-                  <span className="text-sm font-medium text-rose-600 bg-rose-50 px-3 py-1 rounded-full">Total: {formatRp(stats.totalPengeluaran)}</span>
+                  <span className="text-sm font-medium text-rose-600 bg-rose-50 px-3 py-1 rounded-full">Total ({CURRENT_YEAR}): {formatRp(stats.totalPengeluaran)}</span>
                 </h3>
                 
                 {expenses.length === 0 ? (
@@ -1083,19 +1136,32 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
              <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50">
               <div>
-                <h3 className="text-xl font-bold text-slate-800">Matriks Iuran Kas Tahun {CURRENT_YEAR}</h3>
+                <h3 className="text-xl font-bold text-slate-800">Matriks Iuran Kas</h3>
                 <p className="text-sm text-slate-500 mt-1">Rekapitulasi pembayaran bulanan kelas {activeClass?.name}.</p>
               </div>
-              <button onClick={handleExportCSV} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm">
-                <Download className="w-4 h-4" /> Export ke Excel (CSV)
-              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-xl px-3 py-1.5 shadow-sm">
+                  <span className="text-xs font-semibold text-slate-500">Tahun:</span>
+                  <select 
+                    value={selectedReportYear} 
+                    onChange={(e) => setSelectedReportYear(Number(e.target.value))}
+                    className="bg-transparent font-bold text-slate-800 outline-none cursor-pointer text-sm">
+                    {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+
+                <button onClick={handleExportCSV} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl font-medium transition-colors shadow-sm text-sm">
+                  <Download className="w-4 h-4" /> Export CSV
+                </button>
+              </div>
              </div>
              
              <div className="overflow-x-auto p-0">
                <table className="w-full text-left border-collapse min-w-max">
                  <thead className="bg-slate-50 border-b border-slate-200">
                    <tr className="text-xs uppercase text-slate-500 font-bold tracking-wider">
-                     <th className="py-4 px-4 sticky left-0 bg-slate-50 z-20 border-r border-slate-200 shadow-[1px_0_0_rgba(0,0,0,0.05)]">Nama Siswa</th>
+                     <th className="py-4 px-4 sticky left-0 bg-slate-50 z-20 border-r border-slate-200 shadow-[1px_0_0_rgba(0,0,0,0.05)]">Nama Siswa ({selectedReportYear})</th>
                      {MONTHS.map(m => <th key={m} className="py-4 px-3 text-center min-w-[60px]">{m}</th>)}
                    </tr>
                  </thead>
@@ -1109,7 +1175,7 @@ export default function App() {
                            {student.name}
                          </td>
                          {MONTHS.map((m, i) => {
-                           const p = payments.find(pay => pay.studentId === student.id && pay.month === i && pay.year === CURRENT_YEAR);
+                           const p = payments.find(pay => pay.studentId === student.id && pay.month === i && pay.year === selectedReportYear);
                            return (
                              <td key={m} className="py-3 px-3 text-center">
                                {p?.status === 'lunas' ? (
