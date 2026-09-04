@@ -34,7 +34,7 @@ const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR + i);
 const DEFAULT_SETTINGS = { iuranBulanan: 20000, bankName: 'BCA', bankAccount: '1234567890', bankOwner: 'Bendahara Kelas' };
 
 // Ambil Password Super Admin dari Environment Variable Vercel (VITE_SUPER_ADMIN_PIN) atau fallback default
-const SUPER_ADMIN_PIN = import.meta.env.VITE_SUPER_ADMIN_PIN || "adminkaskelas2026";
+const SUPER_ADMIN_PIN = import.meta.env.SUPER_ADMIN_PIN || "admin123";
 
 export default function App() {
   const [user, setUser] = useState(null);
