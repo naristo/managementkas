@@ -25,9 +25,9 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-// const auth = getAuth(app);
-// const db = getFirestore(app);
-// const appId = 'kas-kelas-app';
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = 'kas-kelas-app';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
 const CURRENT_YEAR = new Date().getFullYear();
