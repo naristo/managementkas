@@ -140,23 +140,38 @@ export default function App() {
     if (currentAuth.role === 'superadmin') {
       return { totalKelas: allClasses.length, totalSiswaGlobal: allStudents.length };
     }
-    const totalPemasukan = payments
-      .filter(p => p.status === 'lunas' && p.year === CURRENT_YEAR)
+
+    // Pemasukan keseluruhan lintas waktu (sampai tahun depan / seterusnya)
+    const totalPemasukanAll = payments
+      .filter(p => p.status === 'lunas')
       .reduce((sum, p) => sum + Number(p.amount), 0);
       
-    const totalPengeluaran = expenses
-      .filter(e => e.date && new Date(e.date).getFullYear() === CURRENT_YEAR)
+    const totalPengeluaranAll = expenses
       .reduce((sum, e) => sum + Number(e.amount), 0);
       
+    // Rincian pemasukan per tahun
+    const incomeByYear = {};
+    payments
+      .filter(p => p.status === 'lunas')
+      .forEach(p => {
+        const yr = p.year || CURRENT_YEAR;
+        incomeByYear[yr] = (incomeByYear[yr] || 0) + Number(p.amount);
+      });
+
     const currentMonth = new Date().getMonth();
-    
     let tunggakanCount = 0;
     students.forEach(student => {
       const hasPaid = payments.some(p => p.studentId === student.id && p.month === currentMonth && p.year === CURRENT_YEAR && p.status === 'lunas');
       if (!hasPaid) tunggakanCount++;
     });
 
-    return { kasSaatIni: totalPemasukan - totalPengeluaran, totalPemasukan, totalPengeluaran, tunggakanCount };
+    return { 
+      kasSaatIni: totalPemasukanAll - totalPengeluaranAll, 
+      totalPemasukanAll, 
+      totalPengeluaranAll, 
+      incomeByYear,
+      tunggakanCount 
+    };
   }, [payments, expenses, students, currentAuth.role, allClasses, allStudents]);
 
   const recentActivities = useMemo(() => {
@@ -766,17 +781,29 @@ export default function App() {
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-emerald-50 rounded-xl text-emerald-600"><TrendingUp className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan ({CURRENT_YEAR})</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan (Total)</h3>
                 </div>
-                <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPemasukan)}</p>
+                <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPemasukanAll)}</p>
+                {/* Rincian Pemasukan per Tahun */}
+                {Object.keys(stats.incomeByYear).length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Rincian per Tahun:</p>
+                    {Object.entries(stats.incomeByYear).map(([yr, amt]) => (
+                      <div key={yr} className="flex justify-between text-xs text-slate-600">
+                        <span>Tahun {yr}:</span>
+                        <span className="font-semibold text-emerald-600">{formatRp(amt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-rose-50 rounded-xl text-rose-600"><TrendingDown className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pengeluaran ({CURRENT_YEAR})</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pengeluaran (Total)</h3>
                 </div>
-                <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPengeluaran)}</p>
+                <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPengeluaranAll)}</p>
               </div>
               
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
@@ -1007,7 +1034,7 @@ export default function App() {
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="font-bold text-lg text-slate-800 mb-4 border-b border-slate-100 pb-3 flex items-center justify-between">
                   <span>Riwayat Pengeluaran</span>
-                  <span className="text-sm font-medium text-rose-600 bg-rose-50 px-3 py-1 rounded-full">Total ({CURRENT_YEAR}): {formatRp(stats.totalPengeluaran)}</span>
+                  <span className="text-sm font-medium text-rose-600 bg-rose-50 px-3 py-1 rounded-full">Total: {formatRp(stats.totalPengeluaranAll)}</span>
                 </h3>
                 
                 {expenses.length === 0 ? (
