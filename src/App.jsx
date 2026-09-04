@@ -10,10 +10,10 @@ import {
   CheckCircle, Clock, XCircle, FileText, 
   Upload, Copy, Download, UserPlus, Trash2, 
   History, Calendar, CreditCard, Lock, LogOut, 
-  Key, AlertTriangle, ShieldPlus, PlusCircle, Building, ShieldCheck, Search, Image as ImageIcon, ExternalLink
+  Key, AlertTriangle, ShieldPlus, PlusCircle, Building, ShieldCheck, Search, Image as ImageIcon, ExternalLink, FileCheck
 } from 'lucide-react';
 
-// --- 1. SETUP FIREBASE ---
+// --- 1. SETUP FIREBASE & ENV ---
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : ''),
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).authDomain : ''),
@@ -32,7 +32,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', '
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR + i);
 const DEFAULT_SETTINGS = { iuranBulanan: 20000, bankName: 'BCA', bankAccount: '1234567890', bankOwner: 'Bendahara Kelas' };
-const SUPER_ADMIN_PIN = "adminkaskelas2026";
+
+// Ambil Password Super Admin dari Environment Variable Vercel (VITE_SUPER_ADMIN_PIN) atau fallback default
+const SUPER_ADMIN_PIN = import.meta.env.VITE_SUPER_ADMIN_PIN || "adminkaskelas2026";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -53,6 +55,13 @@ export default function App() {
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
   const [isStudentDropdownOpen, setIsStudentDropdownOpen] = useState(false);
   const [paymentMode, setPaymentMode] = useState('single'); // 'single' | 'batch'
+
+  // State File Upload untuk Siswa & Pengeluaran
+  const [paymentFile, setPaymentFile] = useState(null); // { name, type, data }
+  const [expenseFile, setExpenseFile] = useState(null); // { name, type, data }
+
+  // State Modal Preview File
+  const [previewFile, setPreviewFile] = useState(null);
 
   const [allClasses, setAllClasses] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
@@ -207,6 +216,31 @@ export default function App() {
     }
   };
 
+  // Helper untuk membaca file ke Base64 (JPG/PNG/PDF)
+  const handleFileUploadHelper = (e, setFileState) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.match('image.*') && file.type !== 'application/pdf') {
+      return showToast('Hanya file Gambar (JPG/PNG) atau PDF yang diizinkan!', 'error');
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      return showToast('Ukuran file maksimal 2MB!', 'error');
+    }
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      setFileState({
+        name: file.name,
+        type: file.type,
+        data: uploadEvent.target.result
+      });
+      showToast('File bukti berhasil dilampirkan!');
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleLoginSuperAdmin = (e) => {
     e.preventDefault();
     if (e.target.pin.value === SUPER_ADMIN_PIN) {
@@ -214,7 +248,7 @@ export default function App() {
       setActiveTab('super-dashboard');
       showToast('Berhasil masuk sebagai Super Admin');
     } else {
-      showToast('PIN Super Admin Salah! ', 'error');
+      showToast('PIN Super Admin Salah!', 'error');
     }
   };
 
@@ -247,6 +281,8 @@ export default function App() {
     setStudentSearchQuery('');
     setLoginTab('siswa');
     setActiveTab('dashboard');
+    setPaymentFile(null);
+    setExpenseFile(null);
   };
 
   const handleCreateClass = async (e) => {
@@ -291,7 +327,6 @@ export default function App() {
     });
   };
 
-  // Fungsi Pembayaran (Single & Multiple/Batch Bulan)
   const handleSubmitPayment = async (e) => {
     e.preventDefault();
     if (!currentAuth.studentId) return;
@@ -299,6 +334,7 @@ export default function App() {
     const year = Number(form.get('year'));
 
     const basePath = ['artifacts', appId, 'public', 'data'];
+    const fileData = paymentFile || null;
 
     if (paymentMode === 'single') {
       const month = Number(form.get('month'));
@@ -311,12 +347,13 @@ export default function App() {
       try {
         await addDoc(collection(db, ...basePath, 'payments'), {
           classId: currentAuth.classId, studentId: currentAuth.studentId, month, year, 
-          amount: settings.iuranBulanan, method: 'transfer', status: 'menunggu', timestamp: new Date().toISOString()
+          amount: settings.iuranBulanan, method: 'transfer', status: 'menunggu', 
+          file: fileData, timestamp: new Date().toISOString()
         });
-        showToast('Pembayaran dikirim. Menunggu verifikasi.');
+        showToast('Bukti pembayaran dikirim. Menunggu verifikasi.');
+        setPaymentFile(null);
       } catch (err) { showToast('Gagal mengirim data', 'error'); }
     } else {
-      // Batch Mode (Beberapa bulan sekaligus)
       const startMonth = Number(form.get('startMonth'));
       const endMonth = Number(form.get('endMonth'));
 
@@ -329,14 +366,16 @@ export default function App() {
           try {
             await addDoc(collection(db, ...basePath, 'payments'), {
               classId: currentAuth.classId, studentId: currentAuth.studentId, month: m, year, 
-              amount: settings.iuranBulanan, method: 'transfer', status: 'menunggu', timestamp: new Date().toISOString()
+              amount: settings.iuranBulanan, method: 'transfer', status: 'menunggu', 
+              file: fileData, timestamp: new Date().toISOString()
             });
             successCount++;
           } catch (err) { console.error(err); }
         }
       }
       if (successCount > 0) {
-        showToast(`${successCount} bulan pembayaran diajukan! Menunggu verifikasi bendahara.`);
+        showToast(`${successCount} bulan pembayaran diajukan! Menunggu verifikasi.`);
+        setPaymentFile(null);
       } else {
         showToast('Bulan yang dipilih sudah lunas atau dalam proses verifikasi.', 'error');
       }
@@ -367,10 +406,12 @@ export default function App() {
         desc: formData.get('desc'), 
         amount: Number(formData.get('amount')), 
         category: formData.get('category'), 
-        receiptUrl: formData.get('receiptUrl')?.trim() || '',
+        file: expenseFile || null,
         timestamp: new Date().toISOString()
       });
-      showToast('Pengeluaran berhasil dicatat.'); e.target.reset();
+      showToast('Pengeluaran & bukti berhasil disimpan.'); 
+      setExpenseFile(null);
+      e.target.reset();
     } catch (err) { showToast('Gagal mencatat', 'error'); }
   };
   
@@ -506,7 +547,6 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* AUTOCOMPLETE / SEARCH NAMA SISWA */}
                 <div className="relative">
                   <label className="block text-sm font-medium text-slate-700 mb-1">Cari / Pilih Nama Anda</label>
                   <div className="relative">
@@ -527,7 +567,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Dropdown Hasil Pencarian */}
                   {isStudentDropdownOpen && loginClassId && (
                     <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
                       {filteredLoginStudents.length === 0 ? (
@@ -593,12 +632,12 @@ export default function App() {
                   <XCircle className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-xs text-slate-500 mb-4">Masukkan PIN rahasia Super Admin untuk mengelola data seluruh kelas.</p>
+              <p className="text-xs text-slate-500 mb-4">Masukkan PIN rahasia Super Admin dari Environment Variable Vercel.</p>
               
               <form onSubmit={handleLoginSuperAdmin} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">PIN Super Admin</label>
-                  <input type="password" name="pin" required autoFocus className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+                  <input type="password" name="pin" required autoFocus placeholder="Masukkan PIN" className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
                 </div>
                 <div className="flex gap-2 pt-2">
                   <button type="button" onClick={() => setLoginTab('siswa')} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 rounded-xl transition-colors text-sm">Batal</button>
@@ -746,6 +785,37 @@ export default function App() {
             <div className="flex gap-3">
               <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 rounded-xl transition-colors">Batal</button>
               <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2.5 rounded-xl transition-colors">Yakin</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PREVIEW FILE (GAMBAR / PDF) */}
+      {previewFile && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between mb-4 border-b pb-3">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2 truncate">
+                <FileCheck className="w-5 h-5 text-teal-600"/> {previewFile.name || 'Pratinjau Bukti'}
+              </h3>
+              <button onClick={() => setPreviewFile(null)} className="text-slate-400 hover:text-slate-600">
+                <XCircle className="w-6 h-6"/>
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-100 rounded-xl p-2 min-h-[300px]">
+              {previewFile.type === 'application/pdf' ? (
+                <iframe src={previewFile.data} className="w-full h-[500px] rounded-lg border-0" title="PDF Preview"></iframe>
+              ) : (
+                <img src={previewFile.data} alt="Bukti" className="max-h-[500px] object-contain rounded-lg shadow" />
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <a href={previewFile.data} download={previewFile.name || 'bukti'} className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2">
+                <Download className="w-4 h-4"/> Unduh File
+              </a>
+              <button onClick={() => setPreviewFile(null)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold">Tutup</button>
             </div>
           </div>
         </div>
@@ -899,7 +969,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB BAYAR KAS (DENGAN OPSI BULAN SEKALIGUS) */}
+        {/* TAB BAYAR KAS */}
         {activeTab === 'bayar' && currentAuth.role === 'siswa' && (
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
@@ -914,7 +984,6 @@ export default function App() {
                         <p className="text-sm text-slate-500">Iuran bulanan: <strong className="text-slate-800">{formatRp(settings.iuranBulanan)}</strong></p>
                       </div>
                     </div>
-                    {/* Toggle Mode Pembayaran */}
                     <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
                       <button type="button" onClick={() => setPaymentMode('single')} className={`px-3 py-1.5 rounded-lg transition-all ${paymentMode === 'single' ? 'bg-white shadow text-teal-700' : 'text-slate-500'}`}>1 Bulan</button>
                       <button type="button" onClick={() => setPaymentMode('batch')} className={`px-3 py-1.5 rounded-lg transition-all ${paymentMode === 'batch' ? 'bg-white shadow text-teal-700' : 'text-slate-500'}`}>Beberapa Bulan</button>
@@ -970,6 +1039,24 @@ export default function App() {
                           <Copy className="w-4 h-4"/> <span className="text-[10px] font-bold">Salin</span>
                         </button>
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-1.5 text-slate-700 flex items-center gap-1.5">
+                        <Upload className="w-4 h-4 text-teal-600"/> Upload Bukti Transfer (JPG/PNG/PDF)
+                      </label>
+                      <input 
+                        type="file" 
+                        accept="image/jpeg,image/png,application/pdf"
+                        onChange={(e) => handleFileUploadHelper(e, setPaymentFile)} 
+                        className="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer border border-slate-300 rounded-xl bg-slate-50 p-1" 
+                      />
+                      {paymentFile && (
+                        <div className="mt-2 flex items-center justify-between bg-teal-50 p-2.5 rounded-lg border border-teal-200 text-xs">
+                          <span className="font-medium text-teal-800 truncate">Terlampir: {paymentFile.name}</span>
+                          <button type="button" onClick={() => setPaymentFile(null)} className="text-rose-500 hover:text-rose-700 font-bold ml-2">Hapus</button>
+                        </div>
+                      )}
                     </div>
 
                     <button type="submit" className="w-full bg-teal-600 hover:bg-teal-700 transition-colors text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-sm">
@@ -1033,6 +1120,7 @@ export default function App() {
                       <th className="py-3 px-4 font-semibold">Nama Siswa</th>
                       <th className="py-3 px-4 font-semibold">Bulan / Tahun</th>
                       <th className="py-3 px-4 font-semibold">Nominal</th>
+                      <th className="py-3 px-4 font-semibold text-center">Bukti</th>
                       <th className="py-3 px-4 font-semibold text-center">Aksi</th>
                     </tr>
                   </thead>
@@ -1043,6 +1131,15 @@ export default function App() {
                         <td className="py-4 px-4 font-bold text-slate-800">{getStudentName(pay.studentId)}</td>
                         <td className="py-4 px-4 text-slate-600">{MONTHS[pay.month]} {pay.year}</td>
                         <td className="py-4 px-4 font-semibold text-emerald-600">{formatRp(pay.amount)}</td>
+                        <td className="py-4 px-4 text-center">
+                          {pay.file ? (
+                            <button onClick={() => setPreviewFile(pay.file)} className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 px-2.5 py-1 rounded-lg font-semibold transition-colors">
+                              <ImageIcon className="w-3.5 h-3.5"/> Lihat
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </td>
                         <td className="py-4 px-4">
                           <div className="flex items-center justify-center gap-2">
                             <button onClick={() => handleVerifyPayment(pay.id, true)} className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-colors"><CheckCircle className="w-4 h-4"/> Terima</button>
@@ -1058,7 +1155,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB PENGELUARAN (DENGAN UPLOAD/URL SCREENSHOT BUKTI) */}
+        {/* TAB PENGELUARAN */}
         {activeTab === 'pengeluaran' && currentAuth.role === 'admin' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
@@ -1087,8 +1184,19 @@ export default function App() {
                     <input type="number" name="amount" min="1000" required placeholder="Contoh: 50000" className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm" />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-1 text-slate-700 flex items-center gap-1.5"><ImageIcon className="w-4 h-4 text-teal-600"/> Link Screenshot / Foto Bukti (Opsional)</label>
-                    <input type="url" name="receiptUrl" placeholder="https://imgur.com/... atau URL gambar" className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm" />
+                    <label className="block text-sm font-semibold mb-1 text-slate-700 flex items-center gap-1.5"><ImageIcon className="w-4 h-4 text-teal-600"/> Upload Bukti/Nota (JPG/PNG/PDF)</label>
+                    <input 
+                      type="file" 
+                      accept="image/jpeg,image/png,application/pdf"
+                      onChange={(e) => handleFileUploadHelper(e, setExpenseFile)} 
+                      className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer border border-slate-300 rounded-xl bg-slate-50 p-1" 
+                    />
+                    {expenseFile && (
+                      <div className="mt-2 flex items-center justify-between bg-teal-50 p-2 rounded-lg border border-teal-200 text-xs">
+                        <span className="font-medium text-teal-800 truncate">Terlampir: {expenseFile.name}</span>
+                        <button type="button" onClick={() => setExpenseFile(null)} className="text-rose-500 hover:text-rose-700 font-bold ml-2">Hapus</button>
+                      </div>
+                    )}
                   </div>
                   <button type="submit" className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl mt-2 transition-colors">Simpan Pengeluaran</button>
                 </form>
@@ -1125,10 +1233,10 @@ export default function App() {
                             <td className="py-3 px-3 text-slate-500"><span className="bg-slate-100 px-2 py-1 rounded-md text-xs">{exp.category}</span></td>
                             <td className="py-3 px-3 font-bold text-rose-600 whitespace-nowrap">{formatRp(exp.amount)}</td>
                             <td className="py-3 px-3 text-center">
-                              {exp.receiptUrl ? (
-                                <a href={exp.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 px-2.5 py-1 rounded-lg font-semibold transition-colors">
-                                  <ImageIcon className="w-3.5 h-3.5"/> Lihat <ExternalLink className="w-3 h-3"/>
-                                </a>
+                              {exp.file ? (
+                                <button onClick={() => setPreviewFile(exp.file)} className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 px-2.5 py-1 rounded-lg font-semibold transition-colors">
+                                  <ImageIcon className="w-3.5 h-3.5"/> Lihat
+                                </button>
                               ) : (
                                 <span className="text-xs text-slate-400">-</span>
                               )}
