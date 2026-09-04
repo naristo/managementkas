@@ -10,7 +10,7 @@ import {
   CheckCircle, Clock, XCircle, FileText, 
   Upload, Copy, Download, UserPlus, Trash2, 
   History, Calendar, CreditCard, Lock, LogOut, 
-  Key, AlertTriangle, ShieldPlus, PlusCircle, Building, ShieldCheck, Search
+  Key, AlertTriangle, ShieldPlus, PlusCircle, Building, ShieldCheck, Search, Image as ImageIcon, ExternalLink
 } from 'lucide-react';
 
 // --- 1. SETUP FIREBASE ---
@@ -30,10 +30,9 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'demo-uang-kas-multik
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
 const CURRENT_YEAR = new Date().getFullYear();
-// Generate pilihan tahun dari tahun ini hingga 5 tahun ke depan
 const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR + i);
 const DEFAULT_SETTINGS = { iuranBulanan: 20000, bankName: 'BCA', bankAccount: '1234567890', bankOwner: 'Bendahara Kelas' };
-const SUPER_ADMIN_PIN = "admin123";
+const SUPER_ADMIN_PIN = "adminkaskelas2026";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -51,9 +50,9 @@ export default function App() {
   const [loginTab, setLoginTab] = useState('siswa');
   const [loginClassId, setLoginClassId] = useState('');
   
-  // State Autocomplete / Search Nama Siswa saat Login
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
   const [isStudentDropdownOpen, setIsStudentDropdownOpen] = useState(false);
+  const [paymentMode, setPaymentMode] = useState('single'); // 'single' | 'batch'
 
   const [allClasses, setAllClasses] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
@@ -129,7 +128,6 @@ export default function App() {
   const settings = useMemo(() => allSettings.find(s => s.id === currentAuth.classId) || DEFAULT_SETTINGS, [allSettings, currentAuth.classId]);
   const currentStudent = useMemo(() => students.find(s => s.id === currentAuth.studentId) || null, [students, currentAuth.studentId]);
 
-  // Filter siswa untuk autocomplete login berdasarkan input
   const filteredLoginStudents = useMemo(() => {
     const list = allStudents.filter(s => s.classId === loginClassId);
     if (!studentSearchQuery.trim()) return list;
@@ -141,7 +139,6 @@ export default function App() {
       return { totalKelas: allClasses.length, totalSiswaGlobal: allStudents.length };
     }
 
-    // Pemasukan keseluruhan lintas waktu (sampai tahun depan / seterusnya)
     const totalPemasukanAll = payments
       .filter(p => p.status === 'lunas')
       .reduce((sum, p) => sum + Number(p.amount), 0);
@@ -149,7 +146,6 @@ export default function App() {
     const totalPengeluaranAll = expenses
       .reduce((sum, e) => sum + Number(e.amount), 0);
       
-    // Rincian pemasukan per tahun
     const incomeByYear = {};
     payments
       .filter(p => p.status === 'lunas')
@@ -161,8 +157,13 @@ export default function App() {
     const currentMonth = new Date().getMonth();
     let tunggakanCount = 0;
     students.forEach(student => {
-      const hasPaid = payments.some(p => p.studentId === student.id && p.month === currentMonth && p.year === CURRENT_YEAR && p.status === 'lunas');
-      if (!hasPaid) tunggakanCount++;
+      for (let m = 0; m <= currentMonth; m++) {
+        const hasPaid = payments.some(p => p.studentId === student.id && p.month === m && p.year === CURRENT_YEAR && p.status === 'lunas');
+        if (!hasPaid) {
+          tunggakanCount++;
+          break;
+        }
+      }
     });
 
     return { 
@@ -213,7 +214,7 @@ export default function App() {
       setActiveTab('super-dashboard');
       showToast('Berhasil masuk sebagai Super Admin');
     } else {
-      showToast('PIN Super Admin Salah! (Gunakan: admin123)', 'error');
+      showToast('PIN Super Admin Salah! ', 'error');
     }
   };
 
@@ -290,22 +291,56 @@ export default function App() {
     });
   };
 
-  const handleSubmitPayment = async (month, year, amount, method) => {
+  // Fungsi Pembayaran (Single & Multiple/Batch Bulan)
+  const handleSubmitPayment = async (e) => {
+    e.preventDefault();
     if (!currentAuth.studentId) return;
-    const existing = payments.find(p => p.studentId === currentAuth.studentId && p.month === month && p.year === year);
-    if (existing) {
-      if (existing.status === 'lunas') return showToast(`Bulan ${MONTHS[month]} ${year} sudah lunas!`, 'error');
-      if (existing.status === 'menunggu') return showToast(`Pembayaran bulan ${MONTHS[month]} ${year} sedang menunggu verifikasi.`, 'error');
-    }
+    const form = new FormData(e.target);
+    const year = Number(form.get('year'));
 
-    try {
-      const basePath = ['artifacts', appId, 'public', 'data'];
-      await addDoc(collection(db, ...basePath, 'payments'), {
-        classId: currentAuth.classId, studentId: currentAuth.studentId, month, year, 
-        amount, method, status: 'menunggu', timestamp: new Date().toISOString()
-      });
-      showToast('Pembayaran dikirim. Menunggu verifikasi.');
-    } catch (err) { showToast('Gagal mengirim data', 'error'); }
+    const basePath = ['artifacts', appId, 'public', 'data'];
+
+    if (paymentMode === 'single') {
+      const month = Number(form.get('month'));
+      const existing = payments.find(p => p.studentId === currentAuth.studentId && p.month === month && p.year === year);
+      if (existing) {
+        if (existing.status === 'lunas') return showToast(`Bulan ${MONTHS[month]} ${year} sudah lunas!`, 'error');
+        if (existing.status === 'menunggu') return showToast(`Pembayaran bulan ${MONTHS[month]} ${year} sedang menunggu verifikasi.`, 'error');
+      }
+
+      try {
+        await addDoc(collection(db, ...basePath, 'payments'), {
+          classId: currentAuth.classId, studentId: currentAuth.studentId, month, year, 
+          amount: settings.iuranBulanan, method: 'transfer', status: 'menunggu', timestamp: new Date().toISOString()
+        });
+        showToast('Pembayaran dikirim. Menunggu verifikasi.');
+      } catch (err) { showToast('Gagal mengirim data', 'error'); }
+    } else {
+      // Batch Mode (Beberapa bulan sekaligus)
+      const startMonth = Number(form.get('startMonth'));
+      const endMonth = Number(form.get('endMonth'));
+
+      if (startMonth > endMonth) return showToast('Bulan awal tidak boleh lebih besar dari bulan akhir!', 'error');
+
+      let successCount = 0;
+      for (let m = startMonth; m <= endMonth; m++) {
+        const existing = payments.find(p => p.studentId === currentAuth.studentId && p.month === m && p.year === year);
+        if (!existing || existing.status !== 'lunas') {
+          try {
+            await addDoc(collection(db, ...basePath, 'payments'), {
+              classId: currentAuth.classId, studentId: currentAuth.studentId, month: m, year, 
+              amount: settings.iuranBulanan, method: 'transfer', status: 'menunggu', timestamp: new Date().toISOString()
+            });
+            successCount++;
+          } catch (err) { console.error(err); }
+        }
+      }
+      if (successCount > 0) {
+        showToast(`${successCount} bulan pembayaran diajukan! Menunggu verifikasi bendahara.`);
+      } else {
+        showToast('Bulan yang dipilih sudah lunas atau dalam proses verifikasi.', 'error');
+      }
+    }
   };
 
   const handleVerifyPayment = async (paymentId, isApprove) => {
@@ -327,8 +362,13 @@ export default function App() {
     try {
       const basePath = ['artifacts', appId, 'public', 'data'];
       await addDoc(collection(db, ...basePath, 'expenses'), {
-        classId: currentAuth.classId, date: formData.get('date'), desc: formData.get('desc'), 
-        amount: Number(formData.get('amount')), category: formData.get('category'), timestamp: new Date().toISOString()
+        classId: currentAuth.classId, 
+        date: formData.get('date'), 
+        desc: formData.get('desc'), 
+        amount: Number(formData.get('amount')), 
+        category: formData.get('category'), 
+        receiptUrl: formData.get('receiptUrl')?.trim() || '',
+        timestamp: new Date().toISOString()
       });
       showToast('Pengeluaran berhasil dicatat.'); e.target.reset();
     } catch (err) { showToast('Gagal mencatat', 'error'); }
@@ -558,7 +598,7 @@ export default function App() {
               <form onSubmit={handleLoginSuperAdmin} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">PIN Super Admin</label>
-                  <input type="password" name="pin" required autoFocus placeholder="Default: admin123" className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+                  <input type="password" name="pin" required autoFocus className="w-full border-slate-300 rounded-xl p-3 border bg-slate-50 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
                 </div>
                 <div className="flex gap-2 pt-2">
                   <button type="button" onClick={() => setLoginTab('siswa')} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 rounded-xl transition-colors text-sm">Batal</button>
@@ -784,7 +824,6 @@ export default function App() {
                   <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan (Total)</h3>
                 </div>
                 <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPemasukanAll)}</p>
-                {/* Rincian Pemasukan per Tahun */}
                 {Object.keys(stats.incomeByYear).length > 0 && (
                   <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
                     <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Rincian per Tahun:</p>
@@ -809,7 +848,7 @@ export default function App() {
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-amber-50 rounded-xl text-amber-600"><Users className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Tunggakan Bulan Ini</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Tunggakan (Aktif)</h3>
                 </div>
                 <p className="text-3xl font-bold text-slate-800">{stats.tunggakanCount} <span className="text-base font-medium text-slate-500">Siswa</span></p>
               </div>
@@ -860,46 +899,67 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB BAYAR KAS (DENGAN OPSI BULAN SEKALIGUS) */}
         {activeTab === 'bayar' && currentAuth.role === 'siswa' && (
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center">
-                      <CreditCard className="w-5 h-5" />
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center">
+                        <CreditCard className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg text-slate-800">Form Pembayaran Kas</h3>
+                        <p className="text-sm text-slate-500">Iuran bulanan: <strong className="text-slate-800">{formatRp(settings.iuranBulanan)}</strong></p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-lg text-slate-800">Form Pembayaran Multitahun</h3>
-                      <p className="text-sm text-slate-500">Iuran bulanan: <strong className="text-slate-800">{formatRp(settings.iuranBulanan)}</strong>/bulan</p>
+                    {/* Toggle Mode Pembayaran */}
+                    <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                      <button type="button" onClick={() => setPaymentMode('single')} className={`px-3 py-1.5 rounded-lg transition-all ${paymentMode === 'single' ? 'bg-white shadow text-teal-700' : 'text-slate-500'}`}>1 Bulan</button>
+                      <button type="button" onClick={() => setPaymentMode('batch')} className={`px-3 py-1.5 rounded-lg transition-all ${paymentMode === 'batch' ? 'bg-white shadow text-teal-700' : 'text-slate-500'}`}>Beberapa Bulan</button>
                     </div>
                   </div>
 
-                  <form onSubmit={(e) => { 
-                    e.preventDefault(); 
-                    const form = new FormData(e.target);
-                    handleSubmitPayment(Number(form.get('month')), Number(form.get('year')), settings.iuranBulanan, 'transfer'); 
-                  }} className="space-y-5">
-                    
+                  <form onSubmit={handleSubmitPayment} className="space-y-5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-semibold mb-1.5 text-slate-700">Pilih Tahun</label>
-                        <select name="year" defaultValue={CURRENT_YEAR} className="w-full rounded-xl p-3.5 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none">
+                        <select name="year" defaultValue={CURRENT_YEAR} className="w-full rounded-xl p-3 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm">
                           {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-1.5 text-slate-700">Bayar Untuk Bulan</label>
-                        <select name="month" required className="w-full rounded-xl p-3.5 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none">
-                          {MONTHS.map((m, i) => (
-                            <option key={m} value={i}>{m}</option>
-                          ))}
-                        </select>
-                      </div>
+
+                      {paymentMode === 'single' ? (
+                        <div>
+                          <label className="block text-sm font-semibold mb-1.5 text-slate-700">Pilih Bulan</label>
+                          <select name="month" required className="w-full rounded-xl p-3 border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm">
+                            {MONTHS.map((m, i) => (
+                              <option key={m} value={i}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-semibold mb-1 text-slate-700">Dari Bulan</label>
+                            <select name="startMonth" className="w-full rounded-xl p-3 border border-slate-300 bg-slate-50 outline-none text-sm">
+                              {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold mb-1 text-slate-700">Sampai Bulan</label>
+                            <select name="endMonth" defaultValue={11} className="w-full rounded-xl p-3 border border-slate-300 bg-slate-50 outline-none text-sm">
+                              {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                      <p className="text-sm text-blue-800 font-medium mb-2">Instruksi Transfer:</p>
-                      <p className="text-sm text-blue-700">Silakan transfer sebesar <strong>{formatRp(settings.iuranBulanan)}</strong> ke rekening berikut:</p>
+                      <p className="text-sm text-blue-800 font-medium mb-1">Instruksi Transfer:</p>
+                      <p className="text-sm text-blue-700">Silakan transfer sesuai nominal ke rekening berikut:</p>
                       <div className="mt-3 flex items-center justify-between bg-white p-3 rounded-lg border border-blue-200">
                         <div>
                           <p className="text-xs text-slate-500 uppercase font-semibold">{settings.bankName}</p>
@@ -998,6 +1058,7 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB PENGELUARAN (DENGAN UPLOAD/URL SCREENSHOT BUKTI) */}
         {activeTab === 'pengeluaran' && currentAuth.role === 'admin' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
@@ -1006,15 +1067,15 @@ export default function App() {
                 <form onSubmit={handleAddExpense} className="space-y-4">
                   <div>
                     <label className="block text-sm font-semibold mb-1 text-slate-700">Tanggal</label>
-                    <input type="date" name="date" required defaultValue={new Date().toISOString().split('T')[0]} className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none" />
+                    <input type="date" name="date" required defaultValue={new Date().toISOString().split('T')[0]} className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm" />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-1 text-slate-700">Keterangan</label>
-                    <input type="text" name="desc" required placeholder="Contoh: Fotokopi materi..." className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none" />
+                    <input type="text" name="desc" required placeholder="Contoh: Beli spidol & penghapus..." className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm" />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-1 text-slate-700">Kategori</label>
-                    <select name="category" required className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none">
+                    <select name="category" required className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm">
                       <option value="Perlengkapan">Perlengkapan Kelas</option>
                       <option value="Kegiatan">Kegiatan / Event</option>
                       <option value="Fotokopi">Fotokopi / Tugas</option>
@@ -1023,7 +1084,11 @@ export default function App() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-1 text-slate-700">Nominal (Rp)</label>
-                    <input type="number" name="amount" min="1000" required placeholder="Contoh: 50000" className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none" />
+                    <input type="number" name="amount" min="1000" required placeholder="Contoh: 50000" className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1 text-slate-700 flex items-center gap-1.5"><ImageIcon className="w-4 h-4 text-teal-600"/> Link Screenshot / Foto Bukti (Opsional)</label>
+                    <input type="url" name="receiptUrl" placeholder="https://imgur.com/... atau URL gambar" className="w-full border-slate-300 rounded-xl p-2.5 border bg-slate-50 focus:ring-2 focus:ring-teal-500 outline-none text-sm" />
                   </div>
                   <button type="submit" className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl mt-2 transition-colors">Simpan Pengeluaran</button>
                 </form>
@@ -1048,6 +1113,7 @@ export default function App() {
                           <th className="py-3 px-3 font-semibold">Keterangan</th>
                           <th className="py-3 px-3 font-semibold">Kategori</th>
                           <th className="py-3 px-3 font-semibold">Nominal</th>
+                          <th className="py-3 px-3 font-semibold text-center">Bukti</th>
                           <th className="py-3 px-3 font-semibold text-right">Aksi</th>
                         </tr>
                       </thead>
@@ -1058,6 +1124,15 @@ export default function App() {
                             <td className="py-3 px-3 font-medium text-slate-800">{exp.desc}</td>
                             <td className="py-3 px-3 text-slate-500"><span className="bg-slate-100 px-2 py-1 rounded-md text-xs">{exp.category}</span></td>
                             <td className="py-3 px-3 font-bold text-rose-600 whitespace-nowrap">{formatRp(exp.amount)}</td>
+                            <td className="py-3 px-3 text-center">
+                              {exp.receiptUrl ? (
+                                <a href={exp.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 px-2.5 py-1 rounded-lg font-semibold transition-colors">
+                                  <ImageIcon className="w-3.5 h-3.5"/> Lihat <ExternalLink className="w-3 h-3"/>
+                                </a>
+                              ) : (
+                                <span className="text-xs text-slate-400">-</span>
+                              )}
+                            </td>
                             <td className="py-3 px-3 text-right">
                               <button onClick={() => handleDeleteExpense(exp.id)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
                             </td>
