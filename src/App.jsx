@@ -15,12 +15,12 @@ import {
 
 // --- 1. SETUP FIREBASE & ENV ---
 const firebaseConfig = {
-  apiKey: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : '',
-  authDomain: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).authDomain : '',
-  projectId: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).projectId : '',
-  storageBucket: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).storageBucket : '',
-  messagingSenderId: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).messagingSenderId : '',
-  appId: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).appId : ''
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : ''),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).authDomain : ''),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).projectId : ''),
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).storageBucket : ''),
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).messagingSenderId : ''),
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).appId : '')
 };
 
 const app = initializeApp(firebaseConfig);
