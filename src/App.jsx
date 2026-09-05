@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Analytics } from '@vercel/analytics/react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
@@ -16,12 +15,12 @@ import {
 
 // --- 1. SETUP FIREBASE & ENV ---
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : ''),
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).authDomain : ''),
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).projectId : ''),
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).storageBucket : ''),
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).messagingSenderId : ''),
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || (typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).appId : '')
+  apiKey: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : '',
+  authDomain: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).authDomain : '',
+  projectId: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).projectId : '',
+  storageBucket: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).storageBucket : '',
+  messagingSenderId: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).messagingSenderId : '',
+  appId: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).appId : ''
 };
 
 const app = initializeApp(firebaseConfig);
@@ -34,8 +33,7 @@ const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR + i);
 const DEFAULT_SETTINGS = { iuranBulanan: 20000, bankName: 'BCA', bankAccount: '1234567890', bankOwner: 'Bendahara Kelas' };
 
-// Ambil Password Super Admin dari Environment Variable Vercel (VITE_SUPER_ADMIN_PIN) atau fallback default
-const SUPER_ADMIN_PIN = import.meta.env.SUPER_ADMIN_PIN || "admin123";
+const SUPER_ADMIN_PIN = "adminkaskelas2026";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -46,7 +44,7 @@ export default function App() {
 
   const [currentAuth, setCurrentAuth] = useState({
     isLoggedIn: false,
-    role: null, // 'superadmin' | 'admin' | 'siswa'
+    role: null,
     classId: null,
     studentId: null
   });
@@ -55,13 +53,10 @@ export default function App() {
   
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
   const [isStudentDropdownOpen, setIsStudentDropdownOpen] = useState(false);
-  const [paymentMode, setPaymentMode] = useState('single'); // 'single' | 'batch'
+  const [paymentMode, setPaymentMode] = useState('single');
 
-  // State File Upload untuk Siswa & Pengeluaran
-  const [paymentFile, setPaymentFile] = useState(null); // { name, type, data }
-  const [expenseFile, setExpenseFile] = useState(null); // { name, type, data }
-
-  // State Modal Preview File
+  const [paymentFile, setPaymentFile] = useState(null);
+  const [expenseFile, setExpenseFile] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
 
   const [allClasses, setAllClasses] = useState([]);
@@ -164,14 +159,40 @@ export default function App() {
         incomeByYear[yr] = (incomeByYear[yr] || 0) + Number(p.amount);
       });
 
-    const currentMonth = new Date().getMonth();
+    // --- DATA BULANAN UNTUK GRAFIK TAHUN 2026 ---
+    const monthlyData = MONTHS.map((mName, mIdx) => {
+      const monthlyIncome = payments
+        .filter(p => p.status === 'lunas' && (p.year || CURRENT_YEAR) === 2026 && p.month === mIdx)
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+
+      const monthlyExpense = expenses
+        .filter(e => {
+          const expDate = new Date(e.date || e.timestamp);
+          return expDate.getFullYear() === 2026 && expDate.getMonth() === mIdx;
+        })
+        .reduce((sum, e) => sum + Number(e.amount), 0);
+
+      return { name: mName, pemasukan: monthlyIncome, pengeluaran: monthlyExpense };
+    });
+
+    // --- LOGIKA TUNGGAKAN DIPERBARUI ---
+    // Mengabaikan / tidak menghitung tunggakan dari Januari 2026 (bulan 0) sampai Agustus 2026 (bulan 7).
+    // Perhitungan tunggakan dimulai dari September 2026 (bulan 8) dan seterusnya.
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0 = Januari, 8 = September, dst.
+
     let tunggakanCount = 0;
     students.forEach(student => {
-      for (let m = 0; m <= currentMonth; m++) {
-        const hasPaid = payments.some(p => p.studentId === student.id && p.month === m && p.year === CURRENT_YEAR && p.status === 'lunas');
-        if (!hasPaid) {
-          tunggakanCount++;
-          break;
+      for (let yr = 2026; yr <= currentYear; yr++) {
+        const startM = (yr === 2026) ? 8 : 0;
+        const endM = (yr === currentYear) ? currentMonth : 11;
+
+        for (let m = startM; m <= endM; m++) {
+          const hasPaid = payments.some(p => p.studentId === student.id && p.month === m && p.year === yr && p.status === 'lunas');
+          if (!hasPaid) {
+            tunggakanCount++;
+          }
         }
       }
     });
@@ -181,6 +202,7 @@ export default function App() {
       totalPemasukanAll, 
       totalPengeluaranAll, 
       incomeByYear,
+      monthlyData,
       tunggakanCount 
     };
   }, [payments, expenses, students, currentAuth.role, allClasses, allStudents]);
@@ -217,7 +239,6 @@ export default function App() {
     }
   };
 
-  // Helper untuk membaca file ke Base64 (JPG/PNG/PDF)
   const handleFileUploadHelper = (e, setFileState) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -633,7 +654,7 @@ export default function App() {
                   <XCircle className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-xs text-slate-500 mb-4">Masukkan PIN rahasia Super Admin dari Environment Variable Vercel.</p>
+              <p className="text-xs text-slate-500 mb-4">Masukkan PIN rahasia Super Admin (adminkaskelas2026).</p>
               
               <form onSubmit={handleLoginSuperAdmin} className="space-y-4">
                 <div>
@@ -791,7 +812,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL PREVIEW FILE (GAMBAR / PDF) */}
       {previewFile && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 flex flex-col max-h-[90vh]">
@@ -924,6 +944,67 @@ export default function App() {
                 <p className="text-3xl font-bold text-slate-800">{stats.tunggakanCount} <span className="text-base font-medium text-slate-500">Siswa</span></p>
               </div>
             </div>
+
+            {/* WIDGET ARUS KAS BULANAN (GRAFIK BAR) */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+              <div className="mb-6">
+                <h3 className="text-lg font-bold text-slate-800">Arus Kas Bulanan</h3>
+                <p className="text-xs text-slate-500">Pemasukan vs Pengeluaran sepanjang tahun 2026</p>
+              </div>
+
+              {/* Grafik Batang SVG Sederhana & Responsif */}
+              <div className="relative h-64 w-full flex items-end gap-2 pt-6 pb-8 px-2 border-b border-slate-200">
+                {/* Garis Grid Horizontal */}
+                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pt-6">
+                  {[0.004, 0.003, 0.002, 0.001, 0].map((val, idx) => (
+                    <div key={idx} className="w-full border-b border-dashed border-slate-100 flex items-center">
+                      <span className="text-[10px] text-slate-400 absolute left-2">{val}k</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Batang Data per Bulan */}
+                {stats.monthlyData.map((m, idx) => {
+                  // Skala max 4000 (0.004k dalam format ribuan) atau dinamis
+                  const maxVal = 4000;
+                  const incomeHeight = Math.min(100, (m.pemasukan / maxVal) * 100);
+                  const expenseHeight = Math.min(100, (m.pengeluaran / maxVal) * 100);
+
+                  return (
+                    <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end relative z-10 group">
+                      <div className="w-full flex items-end justify-center gap-1 h-full">
+                        {/* Batang Pemasukan */}
+                        <div 
+                          style={{ height: `${incomeHeight}%` }} 
+                          className="w-2.5 sm:w-4 bg-emerald-500 rounded-t-sm transition-all group-hover:bg-emerald-600"
+                          title={`Pemasukan ${m.name}: ${formatRp(m.pemasukan)}`}
+                        ></div>
+                        {/* Batang Pengeluaran */}
+                        <div 
+                          style={{ height: `${expenseHeight}%` }} 
+                          className="w-2.5 sm:w-4 bg-rose-500 rounded-t-sm transition-all group-hover:bg-rose-600"
+                          title={`Pengeluaran ${m.name}: ${formatRp(m.pengeluaran)}`}
+                        ></div>
+                      </div>
+                      {/* Label Bulan */}
+                      <span className="absolute -bottom-6 text-xs text-slate-500 font-medium">{m.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Legenda Grafik */}
+              <div className="flex items-center justify-center gap-6 mt-8">
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 bg-emerald-500 rounded-sm"></span>
+                  <span className="text-xs font-semibold text-slate-700">Pemasukan</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 bg-rose-500 rounded-sm"></span>
+                  <span className="text-xs font-semibold text-slate-700">Pengeluaran</span>
+                </div>
+              </div>
+            </div>
             
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
               <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-100">
@@ -970,7 +1051,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB BAYAR KAS */}
         {activeTab === 'bayar' && currentAuth.role === 'siswa' && (
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
@@ -1156,7 +1236,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB PENGELUARAN */}
         {activeTab === 'pengeluaran' && currentAuth.role === 'admin' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
@@ -1408,7 +1487,6 @@ export default function App() {
           </div>
         )}
       </main>
-      <Analytics />
     </div>
   );
 }
