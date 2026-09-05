@@ -159,28 +159,24 @@ export default function App() {
         incomeByYear[yr] = (incomeByYear[yr] || 0) + Number(p.amount);
       });
 
-    // --- DATA BULANAN UNTUK GRAFIK TAHUN 2026 ---
     const monthlyData = MONTHS.map((mName, mIdx) => {
       const monthlyIncome = payments
-        .filter(p => p.status === 'lunas' && (p.year || CURRENT_YEAR) === 2026 && p.month === mIdx)
+        .filter(p => p.status === 'lunas' && (p.year || CURRENT_YEAR) === CURRENT_YEAR && p.month === mIdx)
         .reduce((sum, p) => sum + Number(p.amount), 0);
 
       const monthlyExpense = expenses
         .filter(e => {
           const expDate = new Date(e.date || e.timestamp);
-          return expDate.getFullYear() === 2026 && expDate.getMonth() === mIdx;
+          return expDate.getFullYear() === CURRENT_YEAR && expDate.getMonth() === mIdx;
         })
         .reduce((sum, e) => sum + Number(e.amount), 0);
 
       return { name: mName, pemasukan: monthlyIncome, pengeluaran: monthlyExpense };
     });
 
-    // --- LOGIKA TUNGGAKAN DIPERBARUI ---
-    // Mengabaikan / tidak menghitung tunggakan dari Januari 2026 (bulan 0) sampai Agustus 2026 (bulan 7).
-    // Perhitungan tunggakan dimulai dari September 2026 (bulan 8) dan seterusnya.
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0 = Januari, 8 = September, dst.
+    const currentMonth = now.getMonth();
 
     let tunggakanCount = 0;
     students.forEach(student => {
@@ -528,7 +524,6 @@ export default function App() {
 
   if (isLoading) return <div className="flex items-center justify-center min-h-screen text-teal-600 bg-slate-50 font-medium">Memuat sistem...</div>;
 
-  // A. HALAMAN LOGIN
   if (!currentAuth.isLoggedIn) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -654,7 +649,7 @@ export default function App() {
                   <XCircle className="w-5 h-5" />
                 </button>
               </div>
-              <p className="text-xs text-slate-500 mb-4">Masukkan PIN rahasia Super Admin (adminkaskelas2026).</p>
+              <p className="text-xs text-slate-500 mb-4">Masukkan PIN rahasia Super Admin.</p>
               
               <form onSubmit={handleLoginSuperAdmin} className="space-y-4">
                 <div>
@@ -673,7 +668,6 @@ export default function App() {
     );
   }
 
-  // B. PANEL SUPER ADMIN
   if (currentAuth.role === 'superadmin') {
     return (
       <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-12">
@@ -912,26 +906,15 @@ export default function App() {
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-emerald-50 rounded-xl text-emerald-600"><TrendingUp className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan (Total)</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pemasukan</h3>
                 </div>
                 <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPemasukanAll)}</p>
-                {Object.keys(stats.incomeByYear).length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
-                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Rincian per Tahun:</p>
-                    {Object.entries(stats.incomeByYear).map(([yr, amt]) => (
-                      <div key={yr} className="flex justify-between text-xs text-slate-600">
-                        <span>Tahun {yr}:</span>
-                        <span className="font-semibold text-emerald-600">{formatRp(amt)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
               
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="p-2.5 bg-rose-50 rounded-xl text-rose-600"><TrendingDown className="w-5 h-5" /></div>
-                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pengeluaran (Total)</h3>
+                  <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Total Pengeluaran</h3>
                 </div>
                 <p className="text-3xl font-bold text-slate-800">{formatRp(stats.totalPengeluaranAll)}</p>
               </div>
@@ -945,55 +928,38 @@ export default function App() {
               </div>
             </div>
 
-            {/* WIDGET ARUS KAS BULANAN (GRAFIK BAR) */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
               <div className="mb-6">
                 <h3 className="text-lg font-bold text-slate-800">Arus Kas Bulanan</h3>
-                <p className="text-xs text-slate-500">Pemasukan vs Pengeluaran sepanjang tahun 2026</p>
+                <p className="text-xs text-slate-500">Pemasukan vs Pengeluaran sepanjang tahun {CURRENT_YEAR}</p>
               </div>
 
-              {/* Grafik Batang SVG Sederhana & Responsif */}
               <div className="relative h-64 w-full flex items-end gap-2 pt-6 pb-8 px-2 border-b border-slate-200">
-                {/* Garis Grid Horizontal */}
-                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pt-6">
-                  {[0.004, 0.003, 0.002, 0.001, 0].map((val, idx) => (
-                    <div key={idx} className="w-full border-b border-dashed border-slate-100 flex items-center">
-                      <span className="text-[10px] text-slate-400 absolute left-2">{val}k</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Batang Data per Bulan */}
                 {stats.monthlyData.map((m, idx) => {
-                  // Skala max 4000 (0.004k dalam format ribuan) atau dinamis
-                  const maxVal = 4000;
+                  const maxVal = Math.max(...stats.monthlyData.map(item => Math.max(item.pemasukan, item.pengeluaran)), 100000);
                   const incomeHeight = Math.min(100, (m.pemasukan / maxVal) * 100);
                   const expenseHeight = Math.min(100, (m.pengeluaran / maxVal) * 100);
 
                   return (
                     <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end relative z-10 group">
                       <div className="w-full flex items-end justify-center gap-1 h-full">
-                        {/* Batang Pemasukan */}
                         <div 
                           style={{ height: `${incomeHeight}%` }} 
                           className="w-2.5 sm:w-4 bg-emerald-500 rounded-t-sm transition-all group-hover:bg-emerald-600"
                           title={`Pemasukan ${m.name}: ${formatRp(m.pemasukan)}`}
                         ></div>
-                        {/* Batang Pengeluaran */}
                         <div 
                           style={{ height: `${expenseHeight}%` }} 
                           className="w-2.5 sm:w-4 bg-rose-500 rounded-t-sm transition-all group-hover:bg-rose-600"
                           title={`Pengeluaran ${m.name}: ${formatRp(m.pengeluaran)}`}
                         ></div>
                       </div>
-                      {/* Label Bulan */}
                       <span className="absolute -bottom-6 text-xs text-slate-500 font-medium">{m.name}</span>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Legenda Grafik */}
               <div className="flex items-center justify-center gap-6 mt-8">
                 <div className="flex items-center gap-2">
                   <span className="w-3.5 h-3.5 bg-emerald-500 rounded-sm"></span>
@@ -1163,12 +1129,12 @@ export default function App() {
                          }
 
                          return (
-                           <div key={i} className="flex justify-between items-center text-sm border-b border-slate-50 pb-2 last:border-0">
-                             <span className="font-medium text-slate-600">{m}</span>
-                             <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${statusColor}`}>
-                               {statusIcon} {statusText}
-                             </span>
-                           </div>
+                            <div key={i} className="flex justify-between items-center text-sm border-b border-slate-50 pb-2 last:border-0">
+                               <span className="font-medium text-slate-600">{m}</span>
+                               <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${statusColor}`}>
+                                 {statusIcon} {statusText}
+                               </span>
+                            </div>
                          );
                       })}
                    </div>
